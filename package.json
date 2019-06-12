@@ -19,9 +19,11 @@
     "testWithCoverage": "nyc -r text -e .ts -x \"tests/*.test.ts\" mocha -r ts-node/register tests/**/*.test.ts"
   },
   "dependencies": {
+    "bson": "^4.0.2",
     "smart-buffer": "^4.0.2"
   },
   "devDependencies": {
+    "@types/bson": "^4.0.0",
     "@types/chai": "^4.1.7",
     "@types/mocha": "^5.2.7",
     "@types/node": "^12.0.8",

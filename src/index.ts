@@ -5,3 +5,5 @@ export * from './item';
 export * from './item_type';
 export * from './uuid';
 export * from './data_file';
+
+// TODO: parse the map to a json format, for better handling

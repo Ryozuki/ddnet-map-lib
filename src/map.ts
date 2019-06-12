@@ -6,7 +6,7 @@ import ItemType from './item_type';
 import DataFile from './data_file';
 import zlib from 'zlib';
 import { UuidManager } from './uuid';
-import { Item, ItemInfo, ItemTypes } from './item';
+import { Item, ItemInfo } from './item';
 
 export enum DataFileConstants {
     OFFSET_UUID_TYPE = 0x8000,

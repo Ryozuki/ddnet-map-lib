@@ -1,7 +1,11 @@
 import { expect } from 'chai';
-import { DDNetMap } from '../src';
+import { mapToJson } from '../src/parser';
+import fs from 'fs';
+import BSON from 'bson';
+import util from 'util';
 
-describe('parse a map', () => {
+/*
+describe('ok a map', () => {
     let map: DDNetMap;
     before(() => {
         map = DDNetMap.open(__dirname + '/Test.map');
@@ -29,5 +33,21 @@ describe('parse a map', () => {
         expect(map.info.version).to.equal('2.3.0');
         expect(map.info.settings).to.be.an('array');
         expect(map.info.settings![0]).to.equal('stupid_command 1');
+    });
+});
+
+*/
+
+describe('parse a map', () => {
+    let map: any;
+    before(() => {
+        map = mapToJson(__dirname + '/Test.map');
+        fs.writeFileSync('out.bson', map);
+    });
+
+    it('should parse the map', () => {
+        let realMap = BSON.deserialize(map);
+        // console.log(util.inspect(realMap, { showHidden: false, depth: null, colors: true, compact: false }));
+        expect(realMap).to.be.a('object');
     });
 });

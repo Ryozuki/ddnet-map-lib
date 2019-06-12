@@ -11,6 +11,7 @@ module.exports = {
     },
     rules: {
         "@typescript-eslint/explicit-function-return-type": false,
-        "@typescript-eslint/no-non-null-assertion": false
+        "@typescript-eslint/no-non-null-assertion": false,
+        "@typescript-eslint/no-explicit-any": false
     }
 };

@@ -1,16 +1,6 @@
 import { SmartBuffer } from 'smart-buffer';
 import DataFile from './data_file';
-
-export enum ItemTypes {
-    VERSION = 0,
-    INFO,
-    IMAGE,
-    ENVELOPE,
-    GROUP,
-    LAYER,
-    ENVPOINTS,
-    SOUND,
-}
+import { ItemTypes } from './ItemTypes';
 
 export class Item {
     public typeAndID: number;
