@@ -1,7 +1,9 @@
+import { SmartBuffer } from 'smart-buffer';
+
 export default class DataFile {
-    public data: Buffer;
+    public data: SmartBuffer;
 
     public constructor(data: Buffer) {
-        this.data = data;
+        this.data = SmartBuffer.fromBuffer(data);
     }
 }

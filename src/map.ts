@@ -6,7 +6,7 @@ import ItemType from './item_type';
 import DataFile from './data_file';
 import zlib from 'zlib';
 import { UuidManager } from './uuid';
-import { Item } from './item';
+import { Item, ItemInfo, ItemTypes } from './item';
 
 export enum DataFileConstants {
     OFFSET_UUID_TYPE = 0x8000,
@@ -25,6 +25,7 @@ export class DDNetMap {
     public uuidManager: UuidManager;
     public items: Item[] = [];
     public dataFiles: DataFile[] = [];
+    public info: ItemInfo;
 
     public constructor(data: Buffer) {
         this.uuidManager = new UuidManager();
@@ -87,6 +88,11 @@ export class DDNetMap {
                 this.dataFiles.push(new DataFile(data));
             }
         }
+
+        // Load map info
+        let infoType = this.getType(ItemTypes.INFO)!;
+        let item = this.getItem(infoType.start);
+        this.info = new ItemInfo(item, this.dataFiles);
     }
 
     public static open(path: string | number | Buffer | URL) {
