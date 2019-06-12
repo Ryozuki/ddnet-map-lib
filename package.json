@@ -1,0 +1,57 @@
+{
+  "name": "ddnet-map-lib",
+  "version": "0.1.0",
+  "description": "Manipulate ddnet maps",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "repository": "https://github.com/Ryozuki/ddnet-map-lib",
+  "author": "Ryozuki",
+  "license": "MIT",
+  "private": false,
+  "keywords": [
+    "teeworlds",
+    "ddnet",
+    "datafile",
+    "maps"
+  ],
+  "scripts": {
+    "test": "mocha -r ts-node/register tests/**/*.test.ts",
+    "testWithCoverage": "nyc -r text -e .ts -x \"tests/*.test.ts\" mocha -r ts-node/register tests/**/*.test.ts"
+  },
+  "dependencies": {
+    "smart-buffer": "^4.0.2"
+  },
+  "devDependencies": {
+    "@types/chai": "^4.1.7",
+    "@types/mocha": "^5.2.7",
+    "@types/node": "^12.0.8",
+    "@typescript-eslint/eslint-plugin": "^1.10.2",
+    "@typescript-eslint/parser": "^1.10.2",
+    "chai": "^4.2.0",
+    "eslint": "^5.16.0",
+    "eslint-config-prettier": "^4.3.0",
+    "eslint-plugin-prettier": "^3.1.0",
+    "husky": ">=1",
+    "lint-staged": ">=8",
+    "mocha": "^6.1.4",
+    "nyc": "^14.1.1",
+    "prettier": "^1.18.2",
+    "ts-node": "^8.2.0",
+    "typescript": "^3.5.1"
+  },
+  "husky": {
+    "hooks": {
+      "pre-commit": "lint-staged"
+    }
+  },
+  "lint-staged": {
+    "*.js": [
+      "eslint --fix",
+      "git add"
+    ],
+    "*.ts": [
+      "eslint --fix",
+      "git add"
+    ]
+  }
+}
