@@ -210,8 +210,16 @@ export function mapToJson(pathOrData: PathLike | number) {
                 data.soundData = zlib.deflateSync(dataFiles[dataID].toBuffer());
             }
             data.soundSize = item.itemData.readInt32LE();
+
+            dataItems.push({
+                type: item.type,
+                id: item.id,
+                data,
+            });
         } else if (item.type === ItemTypes.GROUP) {
-            let group = {
+            let group: any = {
+                type: item.type,
+                id: item.id,
                 version: item.itemData.readInt32LE(),
                 index: currentGroupIndex,
                 offset: {
@@ -241,9 +249,11 @@ export function mapToJson(pathOrData: PathLike | number) {
             groups.push(group);
         } else if (item.type === ItemTypes.LAYER) {
             let layer: any = {
+                type: item.type,
+                id: item.id,
                 index: currentLayerIndex,
                 version: item.itemData.readInt32LE(),
-                type: item.itemData.readInt32LE(),
+                layerType: item.itemData.readInt32LE(),
                 flags: item.itemData.readInt32LE(),
             };
 
@@ -295,11 +305,19 @@ export function mapToJson(pathOrData: PathLike | number) {
         }
     }
 
-    map.items = dataItems;
+    for (let i in groups) {
+        groups[i].layers = [];
+        for (let j = groups[i].startLayer; j < groups[i].startLayer + groups[i].numLayers; j++) {
+            groups[i].layers.push(layers[j]);
+        }
+    }
 
-    console.log(util.inspect(map, { showHidden: false, depth: null, colors: true, compact: false }));
-    console.log(util.inspect(groups, { showHidden: false, depth: null, colors: true, compact: false }));
-    console.log(util.inspect(layers, { showHidden: false, depth: null, colors: true, compact: false }));
+    map.items = dataItems;
+    map.items = map.items.concat(groups);
+
+    console.log(util.inspect(map, { showHidden: false, depth: 10, colors: true, compact: false }));
+    //console.log(util.inspect(groups, { showHidden: false, depth: null, colors: true, compact: false }));
+    //console.log(util.inspect(layers, { showHidden: false, depth: null, colors: true, compact: false }));
     return BSON.serialize(map);
 }
 
