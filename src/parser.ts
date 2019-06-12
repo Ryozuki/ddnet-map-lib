@@ -259,7 +259,7 @@ export function mapToJson(pathOrData: PathLike | number) {
 
             currentLayerIndex++;
 
-            if (layer.type === LayerTypes.TILES) {
+            if (layer.layerType === LayerTypes.TILES) {
                 layer.tilemap = {
                     version: item.itemData.readInt32LE(),
                     width: item.itemData.readInt32LE(),
@@ -315,7 +315,7 @@ export function mapToJson(pathOrData: PathLike | number) {
     map.items = dataItems;
     map.items = map.items.concat(groups);
 
-    console.log(util.inspect(map, { showHidden: false, depth: 10, colors: true, compact: false }));
+    console.log(util.inspect(map, { showHidden: false, depth: 6, colors: true, compact: false }));
     //console.log(util.inspect(groups, { showHidden: false, depth: null, colors: true, compact: false }));
     //console.log(util.inspect(layers, { showHidden: false, depth: null, colors: true, compact: false }));
     return BSON.serialize(map);
