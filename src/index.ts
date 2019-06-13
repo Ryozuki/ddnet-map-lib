@@ -6,5 +6,3 @@ export * from './LayerTypes';
 export * from './TileTypes';
 export * from './TilesLayerFlags';
 export * from './errors';
-
-// TODO: parse the map to a json format, for better handling

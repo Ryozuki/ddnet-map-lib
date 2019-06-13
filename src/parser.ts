@@ -637,4 +637,4 @@ export function mapToObject(pathOrData: PathLike | number, bson: boolean = true)
     return map as DDNetMap;
 }
 
-export function objectToMap(data: object) {}
+export function objectToMap(data: DDNetMap) {}
