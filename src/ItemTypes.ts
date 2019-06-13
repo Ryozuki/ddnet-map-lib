@@ -7,4 +7,6 @@ export enum ItemTypes {
     LAYER,
     ENVPOINTS,
     SOUND,
+    AUTOMAPPER_CONFIG = 65534,
+    TEST,
 }

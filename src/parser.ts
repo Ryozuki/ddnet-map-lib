@@ -8,6 +8,7 @@ import BSON from 'bson';
 import { LayerTypes } from './LayerTypes';
 import { TilesLayerFlags } from './TilesLayerFlags';
 import { TileTypes } from './TileTypes';
+import { EntityTypes } from './EntityTypes';
 
 /*
 Images on layers are referenced by their id.
@@ -38,6 +39,22 @@ function getStrings(itemData: SmartBuffer, dataFiles: SmartBuffer[]) {
     return strings;
 }
 
+function getPoint(data: SmartBuffer) {
+    return {
+        x: data.readInt32LE(),
+        y: data.readInt32LE(),
+    };
+}
+
+function getColor(data: SmartBuffer) {
+    return {
+        r: data.readInt32LE(),
+        g: data.readInt32LE(),
+        b: data.readInt32LE(),
+        a: data.readInt32LE(),
+    };
+}
+
 function intsToStr(ints: number[]) {
     let text = '';
 
@@ -51,7 +68,7 @@ function intsToStr(ints: number[]) {
     return text.replace(/\0.*/g, '');
 }
 
-export function mapToJson(pathOrData: PathLike | number) {
+export function mapToJson(pathOrData: PathLike | number, bson: boolean = true) {
     let map: any = {
         _version: 1,
     };
@@ -288,6 +305,7 @@ export function mapToJson(pathOrData: PathLike | number) {
             dataItems.push({
                 type: item.type,
                 id: item.id,
+                data,
             });
         } else if (item.type == ItemTypes.ENVPOINTS) {
             item.itemData.readOffset = 0;
@@ -357,15 +375,6 @@ export function mapToJson(pathOrData: PathLike | number) {
 
                 layer.data.tilemap.game = layer.data.tilemap.flags & LayerTypes.GAME;
 
-                for (let i = 0; i < layer.data.tilemap.width * layer.data.tilemap.height; i++) {
-                    layer.data.tilemap.tiles.push({
-                        index: layer.data.tilemap.data.readUInt8(),
-                        flags: layer.data.tilemap.data.readUInt8(),
-                        skip: layer.data.tilemap.data.readUInt8(),
-                        reserved: layer.data.tilemap.data.readUInt8(),
-                    });
-                }
-
                 if (layer.data.tilemap.flags & TilesLayerFlags.TELE) {
                     let teleTypes = [
                         TileTypes.TELEIN,
@@ -386,19 +395,226 @@ export function mapToJson(pathOrData: PathLike | number) {
                             number: teleData.readUInt8(),
                             type: teleData.readUInt8(),
                         };
-                        layer.data.tilemap.tiles[i].index = 0;
+
+                        layer.data.tilemap.tiles.push({
+                            index: 0,
+                        });
+
                         for (let e in teleTypes) {
                             if (teleTile.type === teleTypes[e]) {
                                 layer.data.tilemap.tiles[i].index = teleTypes[e];
+                                layer.data.tilemap.tiles[i].data = teleTile;
                             }
+                        }
+                    }
+                } else if (layer.data.tilemap.flags & TilesLayerFlags.SPEEDUP) {
+                    let speedData = dataFiles[layer.data.tilemap.speedup];
+
+                    for (let i = 0; i < layer.data.tilemap.width * layer.data.tilemap.height; i++) {
+                        let speedupTile = {
+                            force: speedData.readUInt8(),
+                            maxspeed: speedData.readUInt8(),
+                            type: speedData.readUInt8(),
+                            angle: speedData.readInt16LE(),
+                        };
+
+                        layer.data.tilemap.tiles.push({
+                            index: 0,
+                        });
+
+                        if (speedupTile.force > 0) {
+                            layer.data.tilemap.tiles[i].index = TileTypes.BOOST;
+                            layer.data.tilemap.tiles[i].data = speedupTile;
+                        }
+                    }
+                } else if (layer.data.tilemap.flags & TilesLayerFlags.FRONT) {
+                    let frontData = dataFiles[layer.data.tilemap.front];
+
+                    for (let i = 0; i < layer.data.tilemap.width * layer.data.tilemap.height; i++) {
+                        layer.data.tilemap.tiles.push({
+                            index: frontData.readUInt8(),
+                            flags: frontData.readUInt8(),
+                            skip: frontData.readUInt8(),
+                            reserved: frontData.readUInt8(),
+                        });
+                    }
+                } else if (layer.data.tilemap.flags & TilesLayerFlags.SWITCH) {
+                    let switchData = dataFiles[layer.data.tilemap.switch];
+
+                    let switchTypes = [
+                        TileTypes.SWITCHTIMEDOPEN,
+                        TileTypes.SWITCHTIMEDCLOSE,
+                        TileTypes.SWITCHOPEN,
+                        TileTypes.SWITCHCLOSE,
+                        TileTypes.FREEZE,
+                        TileTypes.DFREEZE,
+                        TileTypes.DUNFREEZE,
+                        TileTypes.HIT_START,
+                        TileTypes.HIT_END,
+                        TileTypes.JUMP,
+                        TileTypes.PENALTY,
+                        TileTypes.BONUS,
+                        TileTypes.ALLOW_TELE_GUN,
+                        TileTypes.ALLOW_BLUE_TELE_GUN,
+                    ];
+
+                    for (let i = 0; i < layer.data.tilemap.width * layer.data.tilemap.height; i++) {
+                        layer.data.tilemap.tiles.push({
+                            index: 0,
+                        });
+
+                        let switchTile = {
+                            number: switchData.readUInt8(),
+                            type: switchData.readUInt8(),
+                            flags: switchData.readUInt8(),
+                            delay: switchData.readUInt8(),
+                        };
+
+                        if (
+                            (switchTile.type > EntityTypes.CRAZY_SHOTGUN + EntityTypes.ENTITY_OFFSET &&
+                                switchTile.type < EntityTypes.DRAGGER_WEAK + EntityTypes.ENTITY_OFFSET) ||
+                            switchTile.type == EntityTypes.LASER_O_FAST + EntityTypes.ENTITY_OFFSET
+                        ) {
+                            continue;
+                        } else if (
+                            switchTile.type >= EntityTypes.ARMOR_1 + EntityTypes.ENTITY_OFFSET &&
+                            switchTile.type <= EntityTypes.DOOR + EntityTypes.ENTITY_OFFSET
+                        ) {
+                            layer.data.tilemap.tiles[i].index = switchTile.type;
+                            layer.data.tilemap.tiles[i].flags = switchTile.flags;
+                            layer.data.tilemap.tiles[i].data = switchTile;
+                        }
+
+                        for (let e in switchTypes) {
+                            if (switchTile.type === switchTypes[e]) {
+                                layer.data.tilemap.tiles[i].type = switchTypes[e];
+                                layer.data.tilemap.tiles[i].flags = switchTile.flags;
+                                layer.data.tilemap.tiles[i].data = switchTile;
+                            }
+                        }
+                    }
+                } else if (layer.data.tilemap.flags & TilesLayerFlags.TUNE) {
+                    let tuneData = dataFiles[layer.data.tilemap.tune];
+
+                    for (let i = 0; i < layer.data.tilemap.width * layer.data.tilemap.height; i++) {
+                        let tuneTile = {
+                            number: tuneData.readUInt8(),
+                            type: tuneData.readUInt8(),
+                        };
+
+                        layer.data.tilemap.tiles.push({
+                            index: 0,
+                        });
+
+                        if (tuneTile.type === TileTypes.TUNE1) {
+                            layer.data.tilemap.tiles[i].index = TileTypes.TUNE1;
+                            layer.data.tilemap.tiles[i].data = tuneTile;
+                        }
+                    }
+                } else {
+                    for (let i = 0; i < layer.data.tilemap.width * layer.data.tilemap.height; i++) {
+                        layer.data.tilemap.tiles.push({
+                            index: layer.data.tilemap.data.readUInt8(),
+                            flags: layer.data.tilemap.data.readUInt8(),
+                            skip: layer.data.tilemap.data.readUInt8(),
+                            reserved: layer.data.tilemap.data.readUInt8(),
+                        });
+                        if (layer.data.tilemap.game && layer.data.tilemap.version == (1 << 16) + 23 * 4) {
+                            layer.data.tilemap.tiles[i].index += EntityTypes.ENTITY_OFFSET;
                         }
                     }
                 }
                 delete layer.data.tilemap.data;
+            } else if (layer.data.layerType === LayerTypes.QUADS) {
+                layer.data.quadInfo = {
+                    version: item.itemData.readInt32LE(),
+                    numQuads: item.itemData.readInt32LE(),
+                    data: dataFiles[item.itemData.readInt32LE()],
+                    image: item.itemData.readInt32LE(),
+                    name: intsToStr([
+                        item.itemData.readInt32LE(),
+                        item.itemData.readInt32LE(),
+                        item.itemData.readInt32LE(),
+                    ]),
+                };
 
-                // TODO: Load layer data for speedup front, etc
+                layer.data.quads = [];
+
+                let quadData = layer.data.quadInfo.data;
+
+                for (let i = 0; i < layer.data.quadInfo.numQuads; i++) {
+                    layer.data.quads.push({
+                        points: [
+                            getPoint(quadData),
+                            getPoint(quadData),
+                            getPoint(quadData),
+                            getPoint(quadData),
+                            getPoint(quadData),
+                        ],
+                        colors: [getColor(quadData), getColor(quadData), getColor(quadData), getColor(quadData)],
+                        texCoords: [getPoint(quadData), getPoint(quadData), getPoint(quadData), getPoint(quadData)],
+                        posEnv: quadData.readInt32LE(),
+                        posEnvOffset: quadData.readInt32LE(),
+                        colorEnv: quadData.readInt32LE(),
+                        colorEnvOffset: quadData.readInt32LE(),
+                    });
+                }
+
+                delete layer.data.quadInfo.data;
+            } else if (layer.data.layerType === LayerTypes.SOUNDS) {
+                layer.data.soundInfo = {
+                    version: item.itemData.readInt32LE(),
+                    numSources: item.itemData.readInt32LE(),
+                    data: dataFiles[item.itemData.readInt32LE()],
+                    sound: item.itemData.readInt32LE(),
+                    name: intsToStr([
+                        item.itemData.readInt32LE(),
+                        item.itemData.readInt32LE(),
+                        item.itemData.readInt32LE(),
+                    ]),
+                };
+
+                let sourcesData = layer.data.soundInfo.data;
+
+                layer.data.sources = [];
+                for (let i = 0; i < layer.data.soundInfo.numSources; i++) {
+                    layer.data.sources.push({
+                        position: getPoint(sourcesData),
+                        loop: sourcesData.readInt32LE(),
+                        pan: sourcesData.readInt32LE(),
+                        timeDelay: sourcesData.readInt32LE(),
+                        falOff: sourcesData.readInt32LE(),
+                        posEnv: sourcesData.readInt32LE(),
+                        posEnvOffset: sourcesData.readInt32LE(),
+                        soundEnv: sourcesData.readInt32LE(),
+                        soundEnvOffset: sourcesData.readInt32LE(),
+                        shape: {
+                            type: sourcesData.readInt32LE(),
+                            width: sourcesData.readInt32LE(), // if shape is circle, this is the radius too
+                            height: sourcesData.readInt32LE(),
+                        },
+                    });
+                }
+
+                delete layer.data.soundInfo.data;
             }
+            // TODO: add support for deprecated sound layer?
             layers.push(layer);
+        } else if (item.type === ItemTypes.AUTOMAPPER_CONFIG) {
+            let data = {
+                version: item.itemData.readInt32LE(),
+                groupID: item.itemData.readInt32LE(),
+                layerID: item.itemData.readInt32LE(),
+                autoMapperConfig: item.itemData.readInt32LE(),
+                automapperSeed: item.itemData.readInt32LE(),
+                flags: item.itemData.readInt32LE(),
+            };
+
+            dataItems.push({
+                type: item.type,
+                id: item.id,
+                data,
+            });
         } else {
             console.log('Unknown type found: ', item.type);
         }
@@ -413,10 +629,14 @@ export function mapToJson(pathOrData: PathLike | number) {
 
     map.items = dataItems.concat(groups);
 
-    //console.log(util.inspect(map, { showHidden: false, depth: 7, colors: true, compact: false }));
+    // console.log(util.inspect(map, { showHidden: false, depth: 7, colors: true, compact: false }));
     //console.log(util.inspect(groups, { showHidden: false, depth: null, colors: true, compact: false }));
     //console.log(util.inspect(layers, { showHidden: false, depth: null, colors: true, compact: false }));
-    return BSON.serialize(map);
+    if (bson) {
+        return BSON.serialize(map);
+    } else {
+        return JSON.stringify(map);
+    }
 }
 
 export function jsonToMap(data: object) {}
