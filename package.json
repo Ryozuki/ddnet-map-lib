@@ -19,7 +19,6 @@
     "testWithCoverage": "nyc -r text -e .ts -x \"tests/*.test.ts\" mocha -r ts-node/register tests/**/*.test.ts"
   },
   "dependencies": {
-    "bson": "^4.0.2",
     "smart-buffer": "^4.0.2"
   },
   "devDependencies": {
@@ -39,7 +38,8 @@
     "nyc": "^14.1.1",
     "prettier": "^1.18.2",
     "ts-node": "^8.2.0",
-    "typescript": "^3.5.1"
+    "typescript": "^3.5.1",
+    "bson": "^4.0.2"
   },
   "husky": {
     "hooks": {

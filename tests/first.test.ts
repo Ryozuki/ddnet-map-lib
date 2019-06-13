@@ -7,7 +7,7 @@ describe('parse a map', () => {
     let map: any;
     before(() => {
         map = mapToObject(__dirname + '/Test.map');
-        fs.writeFileSync('out.bson', BSON.serialize(map));
+        // fs.writeFileSync('out.json', JSON.stringify(map, null, 4));
     });
 
     it('should parse the map', () => {

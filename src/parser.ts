@@ -4,12 +4,11 @@ import { InvalidVersionHeaderError } from './errors';
 import zlib from 'zlib';
 import { ItemTypes } from './ItemTypes';
 import util from 'util';
-import BSON from 'bson';
 import { LayerTypes } from './LayerTypes';
 import { TilesLayerFlags } from './TilesLayerFlags';
 import { TileTypes } from './TileTypes';
 import { EntityTypes } from './EntityTypes';
-import { DDNetMap } from './DDNetMap';
+import { DDNetMap, Layer, Group, InfoData, ImageData, SoundData } from './DDNetMap';
 
 /*
 Images on layers are referenced by their id.
@@ -69,7 +68,24 @@ function intsToStr(ints: number[]) {
     return text.replace(/\0.*/g, '');
 }
 
-export function mapToObject(pathOrData: PathLike | number, bson: boolean = true): DDNetMap {
+function strToInts(text: string, num: number) {
+    let ints: number[] = [];
+
+    let index = 0;
+    while (num) {
+        let subInts = [];
+        for (let i = 0; i < 4 && text[index]; i++, index++) {
+            subInts.push(text.charCodeAt(index));
+        }
+        ints.push(
+            ((subInts[0] + 128) << 24) | ((subInts[1] + 128) << 16) | ((subInts[2] + 128) << 8) | (subInts[3] + 128),
+        );
+        num--;
+    }
+    return ints;
+}
+
+export function mapToObject(pathOrData: PathLike | number): DDNetMap {
     let map: any = {
         _version: 1,
     };
@@ -592,7 +608,7 @@ export function mapToObject(pathOrData: PathLike | number, bson: boolean = true)
                         soundEnvOffset: sourcesData.readInt32LE(),
                         shape: {
                             type: sourcesData.readInt32LE(),
-                            widthOrRadius: sourcesData.readInt32LE(), // if shape is circle, this is the radius too
+                            widthOrRadius: sourcesData.readInt32LE(),
                             height: sourcesData.readInt32LE(),
                         },
                     });
@@ -637,4 +653,185 @@ export function mapToObject(pathOrData: PathLike | number, bson: boolean = true)
     return map as DDNetMap;
 }
 
-export function objectToMap(data: DDNetMap) {}
+export function objectToMap(map: DDNetMap): Buffer {
+    let buffer = new SmartBuffer();
+
+    // Version header
+    buffer.writeString(map.meta.magic);
+    buffer.writeInt32LE(map.meta.version);
+
+    // Header
+    buffer.writeInt32LE(map.header.size);
+    buffer.writeInt32LE(map.header.swaplen);
+    buffer.writeInt32LE(map.header.numItemTypes);
+    buffer.writeInt32LE(map.header.numItems);
+    buffer.writeInt32LE(map.header.numData);
+    buffer.writeInt32LE(map.header.itemSize);
+    buffer.writeInt32LE(map.header.dataSize);
+
+    function findItemInfo(type: ItemTypes) {
+        let count = 0;
+
+        for (let i = 0; i < map.items.length; i++) {
+            if (map.items[i].type == type) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    let versionCount = findItemInfo(ItemTypes.VERSION);
+    let infoCount = findItemInfo(ItemTypes.INFO);
+    let imageCount = findItemInfo(ItemTypes.IMAGE);
+    let envelopeCount = findItemInfo(ItemTypes.ENVELOPE);
+    let groupCount = findItemInfo(ItemTypes.GROUP);
+    let envpointsCount = findItemInfo(ItemTypes.ENVPOINTS);
+    let soundCount = findItemInfo(ItemTypes.SOUND);
+    let automapperCount = findItemInfo(ItemTypes.AUTOMAPPER_CONFIG);
+
+    let layerCount = 0;
+
+    for (let i = 0; i < map.items.length; i++) {
+        if (map.items[i].type == ItemTypes.GROUP) {
+            layerCount += (map.items[i].data as Group).layers.length;
+        }
+    }
+
+    let start = 0;
+
+    function writeCount(type: ItemTypes, count: number) {
+        if (count > 0) {
+            buffer.writeInt32LE(type);
+            buffer.writeInt32LE(start);
+            buffer.writeInt32LE(count);
+
+            start += count;
+        }
+    }
+
+    writeCount(ItemTypes.VERSION, versionCount);
+    writeCount(ItemTypes.INFO, infoCount);
+    writeCount(ItemTypes.IMAGE, imageCount);
+    writeCount(ItemTypes.ENVELOPE, envelopeCount);
+    writeCount(ItemTypes.GROUP, groupCount);
+    writeCount(ItemTypes.LAYER, layerCount);
+    writeCount(ItemTypes.ENVPOINTS, envpointsCount);
+    writeCount(ItemTypes.SOUND, soundCount);
+    writeCount(ItemTypes.AUTOMAPPER_CONFIG, automapperCount);
+
+    let itemOffsets = new SmartBuffer();
+    let dataOffsets = new SmartBuffer();
+
+    let currentItemIndex = 0;
+    let currentItemOffset = 0;
+    let currentDataIndex = 0;
+    let currentDataOffset = 0;
+
+    let itemsBuffer = new SmartBuffer();
+    let dataBuffer = new SmartBuffer();
+
+    function writeString(text: string) {
+        let curLength = dataBuffer.length;
+        dataBuffer.writeBuffer(zlib.deflateSync(text));
+        let newLength = dataBuffer.length;
+        dataOffsets.writeInt32LE(currentDataOffset);
+        currentDataOffset += newLength - curLength;
+    }
+
+    function writeBuffer(buf: Buffer) {
+        let curLength = dataBuffer.length;
+        dataBuffer.writeBuffer(zlib.deflateSync(buf));
+        let newLength = dataBuffer.length;
+        dataOffsets.writeInt32LE(currentDataOffset);
+        currentDataOffset += newLength - curLength;
+    }
+
+    function writeItems(type: ItemTypes) {
+        if (type !== ItemTypes.LAYER) {
+            for (let i = 0; i < map.items.length; i++) {
+                let item = map.items[i];
+                if (item.type === type) {
+                    let typeAndID = (item.type << 16) | item.id;
+                    itemsBuffer.writeInt32LE(typeAndID);
+
+                    let itemBuffer = new SmartBuffer();
+                    itemBuffer.writeInt32LE(item.data.version);
+
+                    if (type === ItemTypes.INFO) {
+                        let data = item.data as InfoData;
+                        if (data.author && data.author !== '') {
+                            itemBuffer.writeInt32LE(currentDataIndex);
+                            currentDataIndex++;
+                            writeString(data.author);
+                        } else {
+                            itemBuffer.writeInt32LE(-1);
+                        }
+                        if (data.mapVersion && data.mapVersion !== '') {
+                            itemBuffer.writeInt32LE(currentDataIndex);
+                            currentDataIndex++;
+                            writeString(data.mapVersion);
+                        } else {
+                            itemBuffer.writeInt32LE(-1);
+                        }
+                        if (data.credits && data.credits !== '') {
+                            itemBuffer.writeInt32LE(currentDataIndex);
+                            currentDataIndex++;
+                            writeString(data.credits);
+                        } else {
+                            itemBuffer.writeInt32LE(-1);
+                        }
+                        if (data.license && data.license !== '') {
+                            itemBuffer.writeInt32LE(currentDataIndex);
+                            currentDataIndex++;
+                            writeString(data.license);
+                        } else {
+                            itemBuffer.writeInt32LE(-1);
+                        }
+                    } else if (type === ItemTypes.IMAGE) {
+                        let data = item.data as ImageData;
+                        itemBuffer.writeInt32LE(data.width);
+                        itemBuffer.writeInt32LE(data.height);
+                        itemBuffer.writeInt32LE(data.external);
+
+                        itemBuffer.writeInt32LE(currentDataIndex);
+                        currentDataIndex++;
+                        writeString(data.name);
+
+                        if (data.external !== 1) {
+                            itemBuffer.writeInt32LE(currentDataIndex);
+                            currentDataIndex++;
+
+                            writeBuffer(data.imageData!);
+                        } else {
+                            itemBuffer.writeInt32LE(-1);
+                        }
+                    } else if (type === ItemTypes.SOUND) {
+                        let data = item.data as SoundData;
+                        itemBuffer.writeInt32LE(data.external);
+                        itemBuffer.writeInt32LE(data.external);
+
+                        itemBuffer.writeInt32LE(currentDataIndex);
+                        currentDataIndex++;
+                        writeString(data.name);
+
+                        if (data.external !== 1) {
+                            itemBuffer.writeInt32LE(currentDataIndex);
+                            currentDataIndex++;
+
+                            writeBuffer(data.soundData!);
+                        } else {
+                            itemBuffer.writeInt32LE(-1);
+                        }
+
+                        itemBuffer.writeInt32LE(data.soundSize);
+                    }
+
+                    itemsBuffer.writeInt32LE(itemBuffer.length);
+                    itemsBuffer.writeBuffer(itemBuffer.toBuffer());
+                }
+            }
+        }
+    }
+
+    return buffer.toBuffer();
+}
