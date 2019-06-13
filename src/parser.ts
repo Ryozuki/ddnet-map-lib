@@ -9,6 +9,7 @@ import { LayerTypes } from './LayerTypes';
 import { TilesLayerFlags } from './TilesLayerFlags';
 import { TileTypes } from './TileTypes';
 import { EntityTypes } from './EntityTypes';
+import { DDNetMap } from './DDNetMap';
 
 /*
 Images on layers are referenced by their id.
@@ -68,7 +69,7 @@ function intsToStr(ints: number[]) {
     return text.replace(/\0.*/g, '');
 }
 
-export function mapToJson(pathOrData: PathLike | number, bson: boolean = true) {
+export function mapToObject(pathOrData: PathLike | number, bson: boolean = true): DDNetMap {
     let map: any = {
         _version: 1,
     };
@@ -258,14 +259,8 @@ export function mapToJson(pathOrData: PathLike | number, bson: boolean = true) {
                 data: {
                     version: item.itemData.readInt32LE(),
                     index: currentGroupIndex,
-                    offset: {
-                        x: item.itemData.readInt32LE(),
-                        y: item.itemData.readInt32LE(),
-                    },
-                    parallax: {
-                        x: item.itemData.readInt32LE(),
-                        y: item.itemData.readInt32LE(),
-                    },
+                    offset: getPoint(item.itemData),
+                    parallax: getPoint(item.itemData),
                     startLayer: item.itemData.readInt32LE(),
                     numLayers: item.itemData.readInt32LE(),
                     useClipping: item.itemData.readInt32LE(),
@@ -349,14 +344,9 @@ export function mapToJson(pathOrData: PathLike | number, bson: boolean = true) {
                     width: item.itemData.readInt32LE(),
                     height: item.itemData.readInt32LE(),
                     flags: item.itemData.readInt32LE(),
-                    color: {
-                        r: item.itemData.readInt32LE(),
-                        g: item.itemData.readInt32LE(),
-                        b: item.itemData.readInt32LE(),
-                        a: item.itemData.readInt32LE(),
-                        env: item.itemData.readInt32LE(),
-                        offset: item.itemData.readInt32LE(),
-                    },
+                    color: getColor(item.itemData),
+                    colorEnv: item.itemData.readInt32LE(),
+                    colorOffset: item.itemData.readInt32LE(),
                     image: item.itemData.readInt32LE(),
                     data: dataFiles[item.itemData.readInt32LE()],
                     name: intsToStr([
@@ -373,7 +363,7 @@ export function mapToJson(pathOrData: PathLike | number, bson: boolean = true) {
                 };
                 layer.data.tilemap.data.readOffset = 0;
 
-                layer.data.tilemap.game = layer.data.tilemap.flags & LayerTypes.GAME;
+                layer.data.tilemap.game = layer.data.tilemap.flags & TilesLayerFlags.GAME;
 
                 if (layer.data.tilemap.flags & TilesLayerFlags.TELE) {
                     let teleTypes = [
@@ -398,6 +388,9 @@ export function mapToJson(pathOrData: PathLike | number, bson: boolean = true) {
 
                         layer.data.tilemap.tiles.push({
                             index: 0,
+                            skip: 0,
+                            flags: 0,
+                            reserved: 0,
                         });
 
                         for (let e in teleTypes) {
@@ -413,13 +406,16 @@ export function mapToJson(pathOrData: PathLike | number, bson: boolean = true) {
                     for (let i = 0; i < layer.data.tilemap.width * layer.data.tilemap.height; i++) {
                         let speedupTile = {
                             force: speedData.readUInt8(),
-                            maxspeed: speedData.readUInt8(),
+                            maxSpeed: speedData.readUInt8(),
                             type: speedData.readUInt8(),
                             angle: speedData.readInt16LE(),
                         };
 
                         layer.data.tilemap.tiles.push({
                             index: 0,
+                            skip: 0,
+                            flags: 0,
+                            reserved: 0,
                         });
 
                         if (speedupTile.force > 0) {
@@ -461,6 +457,9 @@ export function mapToJson(pathOrData: PathLike | number, bson: boolean = true) {
                     for (let i = 0; i < layer.data.tilemap.width * layer.data.tilemap.height; i++) {
                         layer.data.tilemap.tiles.push({
                             index: 0,
+                            skip: 0,
+                            flags: 0,
+                            reserved: 0,
                         });
 
                         let switchTile = {
@@ -504,6 +503,9 @@ export function mapToJson(pathOrData: PathLike | number, bson: boolean = true) {
 
                         layer.data.tilemap.tiles.push({
                             index: 0,
+                            skip: 0,
+                            flags: 0,
+                            reserved: 0,
                         });
 
                         if (tuneTile.type === TileTypes.TUNE1) {
@@ -590,7 +592,7 @@ export function mapToJson(pathOrData: PathLike | number, bson: boolean = true) {
                         soundEnvOffset: sourcesData.readInt32LE(),
                         shape: {
                             type: sourcesData.readInt32LE(),
-                            width: sourcesData.readInt32LE(), // if shape is circle, this is the radius too
+                            widthOrRadius: sourcesData.readInt32LE(), // if shape is circle, this is the radius too
                             height: sourcesData.readInt32LE(),
                         },
                     });
@@ -632,11 +634,7 @@ export function mapToJson(pathOrData: PathLike | number, bson: boolean = true) {
     // console.log(util.inspect(map, { showHidden: false, depth: 7, colors: true, compact: false }));
     //console.log(util.inspect(groups, { showHidden: false, depth: null, colors: true, compact: false }));
     //console.log(util.inspect(layers, { showHidden: false, depth: null, colors: true, compact: false }));
-    if (bson) {
-        return BSON.serialize(map);
-    } else {
-        return JSON.stringify(map);
-    }
+    return map as DDNetMap;
 }
 
-export function jsonToMap(data: object) {}
+export function objectToMap(data: object) {}

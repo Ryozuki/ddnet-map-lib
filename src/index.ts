@@ -1,9 +1,10 @@
-export * from './map';
-export * from './header';
-export * from './version_header';
-export * from './item';
-export * from './item_type';
-export * from './uuid';
-export * from './data_file';
+export * from './parser';
+export * from './DDNetMap';
+export * from './EntityTypes';
+export * from './ItemTypes';
+export * from './LayerTypes';
+export * from './TileTypes';
+export * from './TilesLayerFlags';
+export * from './errors';
 
 // TODO: parse the map to a json format, for better handling
