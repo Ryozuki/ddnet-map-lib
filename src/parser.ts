@@ -6,6 +6,12 @@ import { ItemTypes } from './ItemTypes';
 import util from 'util';
 import BSON from 'bson';
 import { LayerTypes } from './LayerTypes';
+import { TilesLayerFlags } from './TilesLayerFlags';
+import { TileTypes } from './TileTypes';
+
+/*
+Images on layers are referenced by their id.
+*/
 
 function getString(itemData: SmartBuffer, dataFiles: SmartBuffer[]) {
     let i = itemData.readInt32LE();
@@ -164,7 +170,16 @@ export function mapToJson(pathOrData: PathLike | number) {
     let currentGroupIndex = 0;
 
     for (let item of items) {
-        if (item.type === ItemTypes.INFO) {
+        if (item.type === ItemTypes.VERSION) {
+            dataItems.push({
+                type: item.type,
+                id: item.id,
+                data: {
+                    version: item.itemData.readInt32LE(),
+                },
+            });
+        } else if (item.type === ItemTypes.INFO) {
+            item.itemData.readOffset = 0;
             dataItems.push({
                 type: item.type,
                 id: item.id,
@@ -178,6 +193,7 @@ export function mapToJson(pathOrData: PathLike | number) {
                 },
             });
         } else if (item.type === ItemTypes.IMAGE) {
+            item.itemData.readOffset = 0;
             let data: any = {
                 version: item.itemData.readInt32LE(),
                 width: item.itemData.readInt32LE(),
@@ -198,6 +214,7 @@ export function mapToJson(pathOrData: PathLike | number) {
                 data,
             });
         } else if (item.type === ItemTypes.SOUND) {
+            item.itemData.readOffset = 0;
             let data: any = {
                 version: item.itemData.readInt32LE(),
                 external: item.itemData.readInt32LE(),
@@ -217,50 +234,99 @@ export function mapToJson(pathOrData: PathLike | number) {
                 data,
             });
         } else if (item.type === ItemTypes.GROUP) {
+            item.itemData.readOffset = 0;
             let group: any = {
                 type: item.type,
                 id: item.id,
+                data: {
+                    version: item.itemData.readInt32LE(),
+                    index: currentGroupIndex,
+                    offset: {
+                        x: item.itemData.readInt32LE(),
+                        y: item.itemData.readInt32LE(),
+                    },
+                    parallax: {
+                        x: item.itemData.readInt32LE(),
+                        y: item.itemData.readInt32LE(),
+                    },
+                    startLayer: item.itemData.readInt32LE(),
+                    numLayers: item.itemData.readInt32LE(),
+                    useClipping: item.itemData.readInt32LE(),
+                    clip: {
+                        x: item.itemData.readInt32LE(),
+                        y: item.itemData.readInt32LE(),
+                        w: item.itemData.readInt32LE(),
+                        h: item.itemData.readInt32LE(),
+                    },
+                    name: intsToStr([
+                        item.itemData.readInt32LE(),
+                        item.itemData.readInt32LE(),
+                        item.itemData.readInt32LE(),
+                    ]),
+                },
+            };
+            currentGroupIndex++;
+            groups.push(group);
+        } else if (item.type === ItemTypes.ENVELOPE) {
+            let data = {
                 version: item.itemData.readInt32LE(),
-                index: currentGroupIndex,
-                offset: {
-                    x: item.itemData.readInt32LE(),
-                    y: item.itemData.readInt32LE(),
-                },
-                parallax: {
-                    x: item.itemData.readInt32LE(),
-                    y: item.itemData.readInt32LE(),
-                },
-                startLayer: item.itemData.readInt32LE(),
-                numLayers: item.itemData.readInt32LE(),
-                useClipping: item.itemData.readInt32LE(),
-                clip: {
-                    x: item.itemData.readInt32LE(),
-                    y: item.itemData.readInt32LE(),
-                    w: item.itemData.readInt32LE(),
-                    h: item.itemData.readInt32LE(),
-                },
+                channels: item.itemData.readInt32LE(),
+                startPoint: item.itemData.readInt32LE(),
+                numPoints: item.itemData.readInt32LE(),
                 name: intsToStr([
                     item.itemData.readInt32LE(),
                     item.itemData.readInt32LE(),
                     item.itemData.readInt32LE(),
+                    item.itemData.readInt32LE(),
+                    item.itemData.readInt32LE(),
+                    item.itemData.readInt32LE(),
+                    item.itemData.readInt32LE(),
+                    item.itemData.readInt32LE(),
                 ]),
+                synchronized: item.itemData.readInt32LE(),
             };
-            currentGroupIndex++;
-            groups.push(group);
+            dataItems.push({
+                type: item.type,
+                id: item.id,
+            });
+        } else if (item.type == ItemTypes.ENVPOINTS) {
+            item.itemData.readOffset = 0;
+            if (item.itemData.length === 0) {
+                // TODO: figure out why this can be empty
+                continue;
+            }
+            let envelope = {
+                type: item.type,
+                id: item.id,
+                data: {
+                    time: item.itemData.readInt32LE(), // in ms
+                    curveType: item.itemData.readInt32LE(),
+                    values: [
+                        item.itemData.readInt32LE(),
+                        item.itemData.readInt32LE(),
+                        item.itemData.readInt32LE(),
+                        item.itemData.readInt32LE(),
+                    ],
+                },
+            };
+            dataItems.push(envelope);
         } else if (item.type === ItemTypes.LAYER) {
+            item.itemData.readOffset = 0;
             let layer: any = {
                 type: item.type,
                 id: item.id,
-                index: currentLayerIndex,
-                version: item.itemData.readInt32LE(),
-                layerType: item.itemData.readInt32LE(),
-                flags: item.itemData.readInt32LE(),
+                data: {
+                    index: currentLayerIndex,
+                    version: item.itemData.readInt32LE(),
+                    layerType: item.itemData.readInt32LE(),
+                    flags: item.itemData.readInt32LE(),
+                },
             };
 
             currentLayerIndex++;
 
-            if (layer.layerType === LayerTypes.TILES) {
-                layer.tilemap = {
+            if (layer.data.layerType === LayerTypes.TILES) {
+                layer.data.tilemap = {
                     version: item.itemData.readInt32LE(),
                     width: item.itemData.readInt32LE(),
                     height: item.itemData.readInt32LE(),
@@ -287,15 +353,48 @@ export function mapToJson(pathOrData: PathLike | number) {
                     tune: item.itemData.readInt32LE(),
                     tiles: [],
                 };
-                layer.tilemap.data.readOffset = 0;
-                for (let i = 0; i < layer.tilemap.width * layer.tilemap.height; i++) {
-                    layer.tilemap.tiles.push({
-                        index: layer.tilemap.data.readUInt8(),
-                        flags: layer.tilemap.data.readUInt8(),
-                        skip: layer.tilemap.data.readUInt8(),
-                        reserved: layer.tilemap.data.readUInt8(),
+                layer.data.tilemap.data.readOffset = 0;
+
+                layer.data.tilemap.game = layer.data.tilemap.flags & LayerTypes.GAME;
+
+                for (let i = 0; i < layer.data.tilemap.width * layer.data.tilemap.height; i++) {
+                    layer.data.tilemap.tiles.push({
+                        index: layer.data.tilemap.data.readUInt8(),
+                        flags: layer.data.tilemap.data.readUInt8(),
+                        skip: layer.data.tilemap.data.readUInt8(),
+                        reserved: layer.data.tilemap.data.readUInt8(),
                     });
                 }
+
+                if (layer.data.tilemap.flags & TilesLayerFlags.TELE) {
+                    let teleTypes = [
+                        TileTypes.TELEIN,
+                        TileTypes.TELEINEVIL,
+                        TileTypes.TELEOUT,
+                        TileTypes.TELECHECK,
+                        TileTypes.TELECHECKIN,
+                        TileTypes.TELECHECKINEVIL,
+                        TileTypes.TELECHECKOUT,
+                        TileTypes.TELEINWEAPON,
+                        TileTypes.TELEINHOOK,
+                    ];
+
+                    let teleData = dataFiles[layer.data.tilemap.tele];
+
+                    for (let i = 0; i < layer.data.tilemap.width * layer.data.tilemap.height; i++) {
+                        let teleTile = {
+                            number: teleData.readUInt8(),
+                            type: teleData.readUInt8(),
+                        };
+                        layer.data.tilemap.tiles[i].index = 0;
+                        for (let e in teleTypes) {
+                            if (teleTile.type === teleTypes[e]) {
+                                layer.data.tilemap.tiles[i].index = teleTypes[e];
+                            }
+                        }
+                    }
+                }
+                delete layer.data.tilemap.data;
 
                 // TODO: Load layer data for speedup front, etc
             }
@@ -306,16 +405,15 @@ export function mapToJson(pathOrData: PathLike | number) {
     }
 
     for (let i in groups) {
-        groups[i].layers = [];
-        for (let j = groups[i].startLayer; j < groups[i].startLayer + groups[i].numLayers; j++) {
-            groups[i].layers.push(layers[j]);
+        groups[i].data.layers = [];
+        for (let j = groups[i].data.startLayer; j < groups[i].data.startLayer + groups[i].data.numLayers; j++) {
+            groups[i].data.layers.push(layers[j]);
         }
     }
 
-    map.items = dataItems;
-    map.items = map.items.concat(groups);
+    map.items = dataItems.concat(groups);
 
-    console.log(util.inspect(map, { showHidden: false, depth: 6, colors: true, compact: false }));
+    //console.log(util.inspect(map, { showHidden: false, depth: 7, colors: true, compact: false }));
     //console.log(util.inspect(groups, { showHidden: false, depth: null, colors: true, compact: false }));
     //console.log(util.inspect(layers, { showHidden: false, depth: null, colors: true, compact: false }));
     return BSON.serialize(map);
