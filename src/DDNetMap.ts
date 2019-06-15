@@ -190,7 +190,7 @@ export interface AutomapperConfig {
 export interface Item {
     type: number;
     id: number;
-    data: VersionData | InfoData | ImageData | Group | SoundData | Envelope | AutomapperConfig;
+    data: VersionData | InfoData | ImageData | Group | SoundData | Envelope | AutomapperConfig | Envpoints[];
 }
 
 export interface DDNetMap extends Object {

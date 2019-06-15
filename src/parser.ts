@@ -8,7 +8,7 @@ import { LayerTypes } from './LayerTypes';
 import { TilesLayerFlags } from './TilesLayerFlags';
 import { TileTypes } from './TileTypes';
 import { EntityTypes } from './EntityTypes';
-import { DDNetMap, Layer, Group, InfoData, ImageData, SoundData } from './DDNetMap';
+import { DDNetMap, Layer, Group, InfoData, ImageData, SoundData, Envelope, Envpoints } from './DDNetMap';
 
 /*
 Images on layers are referenced by their id.
@@ -320,25 +320,29 @@ export function mapToObject(pathOrData: PathLike | number): DDNetMap {
             });
         } else if (item.type == ItemTypes.ENVPOINTS) {
             item.itemData.readOffset = 0;
-            if (item.itemData.length === 0) {
-                // TODO: figure out why this can be empty
-                continue;
-            }
-            let envelope = {
+            let envPoints: any = {
                 type: item.type,
                 id: item.id,
-                data: {
-                    time: item.itemData.readInt32LE(), // in ms
-                    curveType: item.itemData.readInt32LE(),
-                    values: [
-                        item.itemData.readInt32LE(),
-                        item.itemData.readInt32LE(),
-                        item.itemData.readInt32LE(),
-                        item.itemData.readInt32LE(),
-                    ],
-                },
+                data: [],
             };
-            dataItems.push(envelope);
+
+            if (item.size > 0) {
+                let count = item.size / 48;
+
+                for (let i = 0; i < count; i++) {
+                    envPoints.data.push({
+                        time: item.itemData.readInt32LE(), // in ms
+                        curveType: item.itemData.readInt32LE(),
+                        values: [
+                            item.itemData.readInt32LE(),
+                            item.itemData.readInt32LE(),
+                            item.itemData.readInt32LE(),
+                            item.itemData.readInt32LE(),
+                        ],
+                    });
+                }
+            }
+            dataItems.push(envPoints);
         } else if (item.type === ItemTypes.LAYER) {
             item.itemData.readOffset = 0;
             let layer: any = {
@@ -755,7 +759,9 @@ export function objectToMap(map: DDNetMap): Buffer {
                     itemsBuffer.writeInt32LE(typeAndID);
 
                     let itemBuffer = new SmartBuffer();
-                    itemBuffer.writeInt32LE(item.data.version);
+                    if (item.type !== ItemTypes.ENVELOPE) {
+                        itemBuffer.writeInt32LE((item.data as any).version);
+                    }
 
                     if (type === ItemTypes.INFO) {
                         let data = item.data as InfoData;
@@ -808,7 +814,6 @@ export function objectToMap(map: DDNetMap): Buffer {
                     } else if (type === ItemTypes.SOUND) {
                         let data = item.data as SoundData;
                         itemBuffer.writeInt32LE(data.external);
-                        itemBuffer.writeInt32LE(data.external);
 
                         itemBuffer.writeInt32LE(currentDataIndex);
                         currentDataIndex++;
@@ -824,10 +829,35 @@ export function objectToMap(map: DDNetMap): Buffer {
                         }
 
                         itemBuffer.writeInt32LE(data.soundSize);
+                    } else if (type === ItemTypes.ENVELOPE) {
+                        let data = item.data as Envelope;
+                        itemBuffer.writeInt32LE(data.version);
+                        itemBuffer.writeInt32LE(data.channels);
+                        itemBuffer.writeInt32LE(data.startPoint);
+                        let ints = strToInts(data.name, 8);
+                        for (let i in ints) {
+                            itemBuffer.writeInt32LE(ints[i]);
+                        }
+                        itemBuffer.writeInt32LE(data.synchronized);
+                    } else if (type === ItemTypes.ENVPOINTS) {
+                        let data = item.data as Envpoints[];
+
+                        if (data.length > 0) {
+                            for (let i in data) {
+                                itemBuffer.writeInt32LE(data[i].time);
+                                itemBuffer.writeInt32LE(data[i].curveType);
+                                itemBuffer.writeInt32LE(data[i].values[0]);
+                                itemBuffer.writeInt32LE(data[i].values[1]);
+                                itemBuffer.writeInt32LE(data[i].values[2]);
+                                itemBuffer.writeInt32LE(data[i].values[3]);
+                            }
+                        }
                     }
 
                     itemsBuffer.writeInt32LE(itemBuffer.length);
                     itemsBuffer.writeBuffer(itemBuffer.toBuffer());
+
+                    // TODO: Do all other items the same way
                 }
             }
         }
