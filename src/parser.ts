@@ -680,20 +680,12 @@ export function loadMap(pathOrData: PathLike | number): DDNetMap {
 }
 
 export function saveMap(map: DDNetMap): Buffer {
+    let headerBuffer = new SmartBuffer();
     let buffer = new SmartBuffer();
 
     // Version header
-    buffer.writeString(map.meta.magic);
-    buffer.writeInt32LE(map.meta.version);
-
-    // Header
-    buffer.writeInt32LE(map.header.size);
-    buffer.writeInt32LE(map.header.swaplen);
-    buffer.writeInt32LE(map.header.numItemTypes);
-    buffer.writeInt32LE(map.header.numItems);
-    buffer.writeInt32LE(map.header.numData);
-    buffer.writeInt32LE(map.header.itemSize);
-    buffer.writeInt32LE(map.header.dataSize);
+    headerBuffer.writeString(map.meta.magic);
+    headerBuffer.writeInt32LE(map.meta.version);
 
     function findItemInfo(type: ItemTypes) {
         let count = 0;
@@ -725,8 +717,11 @@ export function saveMap(map: DDNetMap): Buffer {
 
     let start = 0;
 
+    let numItemTypes = 0;
+
     function writeCount(type: ItemTypes, count: number) {
         if (count > 0) {
+            numItemTypes++;
             buffer.writeInt32LE(type);
             buffer.writeInt32LE(start);
             buffer.writeInt32LE(count);
@@ -1094,7 +1089,16 @@ export function saveMap(map: DDNetMap): Buffer {
     buffer.writeBuffer(itemsBuffer.toBuffer());
     buffer.writeBuffer(dataBuffer.toBuffer());
 
-    // TODO: Need to fix: header item and data size are not correct, must be set from these buffers.
+    // Header
+    headerBuffer.writeInt32LE(buffer.length + 20);
+    headerBuffer.writeInt32LE(map.header.swaplen); // need to count all integers?
+    headerBuffer.writeInt32LE(numItemTypes);
+    headerBuffer.writeInt32LE(map.items.length + layerCount);
+    headerBuffer.writeInt32LE(currentDataIndex + 1);
+    headerBuffer.writeInt32LE(itemsBuffer.length);
+    headerBuffer.writeInt32LE(dataBuffer.length);
 
-    return buffer.toBuffer();
+    headerBuffer.writeBuffer(buffer.toBuffer());
+
+    return headerBuffer.toBuffer();
 }
