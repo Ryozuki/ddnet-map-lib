@@ -85,7 +85,7 @@ export interface Tile {
     index: number;
     flags: number;
     skip: number;
-    reserver: number;
+    reserved: number;
     data?: TeleTileData | SpeedupTileData | SwitchTileData | TuneTileData;
 }
 
@@ -97,7 +97,7 @@ export interface TilesLayer extends Layer {
         flags: TilesLayerFlags;
         color: Color;
         colorEnv: number;
-        colorOffset: number;
+        colorEnvOffset: number;
         image: number;
         name: string;
         tele: number;
@@ -105,6 +105,7 @@ export interface TilesLayer extends Layer {
         front: number;
         switch: number;
         tune: number;
+        game: number;
         tiles: Tile[];
     };
 }
@@ -160,7 +161,7 @@ export interface Group {
     useClipping: number;
     clip: Rect;
     name: string;
-    layers: (Layer | TilesLayer | QuadsLayer | SoundsLayer)[];
+    layers: (Layer & (TilesLayer | QuadsLayer | SoundsLayer))[];
 }
 
 export interface Envelope {

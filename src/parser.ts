@@ -8,7 +8,22 @@ import { LayerTypes } from './LayerTypes';
 import { TilesLayerFlags } from './TilesLayerFlags';
 import { TileTypes } from './TileTypes';
 import { EntityTypes } from './EntityTypes';
-import { DDNetMap, Layer, Group, InfoData, ImageData, SoundData, Envelope, Envpoints } from './DDNetMap';
+import {
+    DDNetMap,
+    Layer,
+    Group,
+    InfoData,
+    ImageData,
+    SoundData,
+    Envelope,
+    Envpoints,
+    TilesLayer,
+    Color,
+    TeleTileData,
+    SpeedupTileData,
+    SwitchTileData,
+    TuneTileData,
+} from './DDNetMap';
 
 /*
 Images on layers are referenced by their id.
@@ -83,6 +98,13 @@ function strToInts(text: string, num: number) {
         num--;
     }
     return ints;
+}
+
+function writeColor(buffer: SmartBuffer, color: Color) {
+    buffer.writeInt32LE(color.r);
+    buffer.writeInt32LE(color.g);
+    buffer.writeInt32LE(color.b);
+    buffer.writeInt32LE(color.a);
 }
 
 export function loadMap(pathOrData: PathLike | number): DDNetMap {
@@ -366,7 +388,7 @@ export function loadMap(pathOrData: PathLike | number): DDNetMap {
                     flags: item.itemData.readInt32LE(),
                     color: getColor(item.itemData),
                     colorEnv: item.itemData.readInt32LE(),
-                    colorOffset: item.itemData.readInt32LE(),
+                    colorEnvOffset: item.itemData.readInt32LE(),
                     image: item.itemData.readInt32LE(),
                     data: dataFiles[item.itemData.readInt32LE()],
                     name: intsToStr([
@@ -726,16 +748,24 @@ export function saveMap(map: DDNetMap): Buffer {
     let itemOffsets = new SmartBuffer();
     let dataOffsets = new SmartBuffer();
 
-    let currentItemIndex = 0;
     let currentItemOffset = 0;
     let currentDataIndex = 0;
     let currentDataOffset = 0;
+    let currentLayerIndex = 0;
 
+    let layersBuffer = new SmartBuffer();
+    let layerOffsets = new SmartBuffer();
+    let currentLayerOffset = 0;
+
+    let dataSizes = new SmartBuffer();
     let itemsBuffer = new SmartBuffer();
     let dataBuffer = new SmartBuffer();
 
     function writeString(text: string) {
         let curLength = dataBuffer.length;
+        let buf = Buffer.from(text, 'ascii');
+        // TODO: figure out if the data sizes contains compressed values or not
+        dataSizes.writeInt32LE(buf.length);
         dataBuffer.writeBuffer(zlib.deflateSync(text));
         let newLength = dataBuffer.length;
         dataOffsets.writeInt32LE(currentDataOffset);
@@ -744,6 +774,7 @@ export function saveMap(map: DDNetMap): Buffer {
 
     function writeBuffer(buf: Buffer) {
         let curLength = dataBuffer.length;
+        dataSizes.writeInt32LE(buf.length);
         dataBuffer.writeBuffer(zlib.deflateSync(buf));
         let newLength = dataBuffer.length;
         dataOffsets.writeInt32LE(currentDataOffset);
@@ -751,117 +782,319 @@ export function saveMap(map: DDNetMap): Buffer {
     }
 
     function writeItems(type: ItemTypes) {
-        if (type !== ItemTypes.LAYER) {
-            for (let i = 0; i < map.items.length; i++) {
-                let item = map.items[i];
-                if (item.type === type) {
-                    let typeAndID = (item.type << 16) | item.id;
-                    itemsBuffer.writeInt32LE(typeAndID);
+        for (let i = 0; i < map.items.length; i++) {
+            let item = map.items[i];
+            if (item.type === type) {
+                let typeAndID = (item.type << 16) | item.id;
+                itemsBuffer.writeInt32LE(typeAndID);
 
-                    let itemBuffer = new SmartBuffer();
-                    if (item.type !== ItemTypes.ENVPOINTS) {
-                        itemBuffer.writeInt32LE((item.data as any).version);
-                    }
-
-                    if (type === ItemTypes.INFO) {
-                        let data = item.data as InfoData;
-                        if (data.author && data.author !== '') {
-                            itemBuffer.writeInt32LE(currentDataIndex);
-                            currentDataIndex++;
-                            writeString(data.author);
-                        } else {
-                            itemBuffer.writeInt32LE(-1);
-                        }
-                        if (data.mapVersion && data.mapVersion !== '') {
-                            itemBuffer.writeInt32LE(currentDataIndex);
-                            currentDataIndex++;
-                            writeString(data.mapVersion);
-                        } else {
-                            itemBuffer.writeInt32LE(-1);
-                        }
-                        if (data.credits && data.credits !== '') {
-                            itemBuffer.writeInt32LE(currentDataIndex);
-                            currentDataIndex++;
-                            writeString(data.credits);
-                        } else {
-                            itemBuffer.writeInt32LE(-1);
-                        }
-                        if (data.license && data.license !== '') {
-                            itemBuffer.writeInt32LE(currentDataIndex);
-                            currentDataIndex++;
-                            writeString(data.license);
-                        } else {
-                            itemBuffer.writeInt32LE(-1);
-                        }
-                    } else if (type === ItemTypes.IMAGE) {
-                        let data = item.data as ImageData;
-                        itemBuffer.writeInt32LE(data.width);
-                        itemBuffer.writeInt32LE(data.height);
-                        itemBuffer.writeInt32LE(data.external);
-
-                        itemBuffer.writeInt32LE(currentDataIndex);
-                        currentDataIndex++;
-                        writeString(data.name);
-
-                        if (data.external !== 1) {
-                            itemBuffer.writeInt32LE(currentDataIndex);
-                            currentDataIndex++;
-
-                            writeBuffer(data.imageData!);
-                        } else {
-                            itemBuffer.writeInt32LE(-1);
-                        }
-                    } else if (type === ItemTypes.SOUND) {
-                        let data = item.data as SoundData;
-                        itemBuffer.writeInt32LE(data.external);
-
-                        itemBuffer.writeInt32LE(currentDataIndex);
-                        currentDataIndex++;
-                        writeString(data.name);
-
-                        if (data.external !== 1) {
-                            itemBuffer.writeInt32LE(currentDataIndex);
-                            currentDataIndex++;
-
-                            writeBuffer(data.soundData!);
-                        } else {
-                            itemBuffer.writeInt32LE(-1);
-                        }
-
-                        itemBuffer.writeInt32LE(data.soundSize);
-                    } else if (type === ItemTypes.ENVELOPE) {
-                        let data = item.data as Envelope;
-                        itemBuffer.writeInt32LE(data.version);
-                        itemBuffer.writeInt32LE(data.channels);
-                        itemBuffer.writeInt32LE(data.startPoint);
-                        let ints = strToInts(data.name, 8);
-                        for (let i in ints) {
-                            itemBuffer.writeInt32LE(ints[i]);
-                        }
-                        itemBuffer.writeInt32LE(data.synchronized);
-                    } else if (type === ItemTypes.ENVPOINTS) {
-                        let data = item.data as Envpoints[];
-
-                        if (data.length > 0) {
-                            for (let i in data) {
-                                itemBuffer.writeInt32LE(data[i].time);
-                                itemBuffer.writeInt32LE(data[i].curveType);
-                                itemBuffer.writeInt32LE(data[i].values[0]);
-                                itemBuffer.writeInt32LE(data[i].values[1]);
-                                itemBuffer.writeInt32LE(data[i].values[2]);
-                                itemBuffer.writeInt32LE(data[i].values[3]);
-                            }
-                        }
-                    }
-
-                    itemsBuffer.writeInt32LE(itemBuffer.length);
-                    itemsBuffer.writeBuffer(itemBuffer.toBuffer());
-
-                    // TODO: Do all other items the same way
+                let itemBuffer = new SmartBuffer();
+                if (item.type !== ItemTypes.ENVPOINTS) {
+                    itemBuffer.writeInt32LE((item.data as any).version);
                 }
+
+                if (type === ItemTypes.INFO) {
+                    let data = item.data as InfoData;
+                    if (data.author && data.author !== '') {
+                        itemBuffer.writeInt32LE(currentDataIndex);
+                        currentDataIndex++;
+                        writeString(data.author);
+                    } else {
+                        itemBuffer.writeInt32LE(-1);
+                    }
+                    if (data.mapVersion && data.mapVersion !== '') {
+                        itemBuffer.writeInt32LE(currentDataIndex);
+                        currentDataIndex++;
+                        writeString(data.mapVersion);
+                    } else {
+                        itemBuffer.writeInt32LE(-1);
+                    }
+                    if (data.credits && data.credits !== '') {
+                        itemBuffer.writeInt32LE(currentDataIndex);
+                        currentDataIndex++;
+                        writeString(data.credits);
+                    } else {
+                        itemBuffer.writeInt32LE(-1);
+                    }
+                    if (data.license && data.license !== '') {
+                        itemBuffer.writeInt32LE(currentDataIndex);
+                        currentDataIndex++;
+                        writeString(data.license);
+                    } else {
+                        itemBuffer.writeInt32LE(-1);
+                    }
+                } else if (type === ItemTypes.IMAGE) {
+                    let data = item.data as ImageData;
+                    itemBuffer.writeInt32LE(data.width);
+                    itemBuffer.writeInt32LE(data.height);
+                    itemBuffer.writeInt32LE(data.external);
+
+                    itemBuffer.writeInt32LE(currentDataIndex);
+                    currentDataIndex++;
+                    writeString(data.name);
+
+                    if (data.external !== 1) {
+                        itemBuffer.writeInt32LE(currentDataIndex);
+                        currentDataIndex++;
+                        writeBuffer(data.imageData!);
+                    } else {
+                        itemBuffer.writeInt32LE(-1);
+                    }
+                } else if (type === ItemTypes.SOUND) {
+                    let data = item.data as SoundData;
+                    itemBuffer.writeInt32LE(data.external);
+
+                    itemBuffer.writeInt32LE(currentDataIndex);
+                    currentDataIndex++;
+                    writeString(data.name);
+
+                    if (data.external !== 1) {
+                        itemBuffer.writeInt32LE(currentDataIndex);
+                        currentDataIndex++;
+                        writeBuffer(data.soundData!);
+                    } else {
+                        itemBuffer.writeInt32LE(-1);
+                    }
+
+                    itemBuffer.writeInt32LE(data.soundSize);
+                } else if (type === ItemTypes.ENVELOPE) {
+                    let data = item.data as Envelope;
+                    itemBuffer.writeInt32LE(data.version);
+                    itemBuffer.writeInt32LE(data.channels);
+                    itemBuffer.writeInt32LE(data.startPoint);
+                    let ints = strToInts(data.name, 8);
+                    for (let i in ints) {
+                        itemBuffer.writeInt32LE(ints[i]);
+                    }
+                    itemBuffer.writeInt32LE(data.synchronized);
+                } else if (type === ItemTypes.ENVPOINTS) {
+                    let data = item.data as Envpoints[];
+
+                    if (data.length > 0) {
+                        for (let i in data) {
+                            itemBuffer.writeInt32LE(data[i].time);
+                            itemBuffer.writeInt32LE(data[i].curveType);
+                            itemBuffer.writeInt32LE(data[i].values[0]);
+                            itemBuffer.writeInt32LE(data[i].values[1]);
+                            itemBuffer.writeInt32LE(data[i].values[2]);
+                            itemBuffer.writeInt32LE(data[i].values[3]);
+                        }
+                    }
+                } else if (type === ItemTypes.GROUP) {
+                    let data = item.data as Group;
+
+                    itemBuffer.writeInt32LE(data.version);
+                    itemBuffer.writeInt32LE(data.offset.x);
+                    itemBuffer.writeInt32LE(data.offset.y);
+                    itemBuffer.writeInt32LE(data.parallax.x);
+                    itemBuffer.writeInt32LE(data.parallax.y);
+                    itemBuffer.writeInt32LE(currentLayerIndex);
+                    itemBuffer.writeInt32LE(data.layers.length);
+
+                    itemBuffer.writeInt32LE(data.useClipping);
+                    itemBuffer.writeInt32LE(data.clip.x);
+                    itemBuffer.writeInt32LE(data.clip.y);
+                    itemBuffer.writeInt32LE(data.clip.w);
+                    itemBuffer.writeInt32LE(data.clip.h);
+                    let ints = strToInts(data.name, 3);
+                    itemBuffer.writeInt32LE(ints[0]);
+                    itemBuffer.writeInt32LE(ints[1]);
+                    itemBuffer.writeInt32LE(ints[2]);
+
+                    for (let i in data.layers) {
+                        let layerdata = data.layers[i];
+
+                        let layerBuffer = new SmartBuffer();
+
+                        layerBuffer.writeInt32LE(layerdata.version);
+                        layerBuffer.writeInt32LE(layerdata.layerType);
+                        layerBuffer.writeInt32LE(layerdata.flags);
+
+                        if (layerdata.layerType === LayerTypes.TILES) {
+                            let tileLayerData = (layerdata as any) as (Layer & TilesLayer);
+                            layerBuffer.writeInt32LE(3);
+                            layerBuffer.writeInt32LE(tileLayerData.tilemap.width);
+                            layerBuffer.writeInt32LE(tileLayerData.tilemap.height);
+
+                            let tilesData = new SmartBuffer();
+                            let tilesDDNetData = new SmartBuffer();
+
+                            tileLayerData.tilemap.flags = 0;
+                            if (tileLayerData.tilemap.tele) {
+                                tileLayerData.tilemap.flags = TilesLayerFlags.TELE;
+
+                                tileLayerData.tilemap.tele = currentDataIndex;
+
+                                for (let i in tileLayerData.tilemap.tiles) {
+                                    let tile = tileLayerData.tilemap.tiles[i];
+
+                                    tilesData.writeUInt8(tile.index);
+                                    tilesData.writeUInt8(tile.flags);
+                                    tilesData.writeUInt8(tile.skip);
+                                    tilesData.writeUInt8(tile.reserved);
+
+                                    let tileData = tile.data as TeleTileData;
+
+                                    tilesDDNetData.writeUInt8(tileData.number);
+                                    tilesDDNetData.writeUInt8(tileData.type);
+                                }
+                            } else if (tileLayerData.tilemap.speedup) {
+                                tileLayerData.tilemap.flags = TilesLayerFlags.SPEEDUP;
+                                tileLayerData.tilemap.speedup = currentDataIndex;
+
+                                for (let i in tileLayerData.tilemap.tiles) {
+                                    let tile = tileLayerData.tilemap.tiles[i];
+
+                                    tilesData.writeUInt8(tile.index);
+                                    tilesData.writeUInt8(tile.flags);
+                                    tilesData.writeUInt8(tile.skip);
+                                    tilesData.writeUInt8(tile.reserved);
+
+                                    let tileData = tile.data as SpeedupTileData;
+                                    tilesDDNetData.writeUInt8(tileData.force);
+                                    tilesDDNetData.writeUInt8(tileData.maxSpeed);
+                                    tilesDDNetData.writeUInt8(tileData.type);
+                                    tilesDDNetData.writeInt16LE(tileData.angle);
+                                }
+                            } else if (tileLayerData.tilemap.front) {
+                                tileLayerData.tilemap.flags = TilesLayerFlags.FRONT;
+                                tileLayerData.tilemap.front = currentDataIndex;
+
+                                for (let i in tileLayerData.tilemap.tiles) {
+                                    let tile = tileLayerData.tilemap.tiles[i];
+
+                                    tilesData.writeUInt8(tile.index);
+                                    tilesData.writeUInt8(tile.flags);
+                                    tilesData.writeUInt8(tile.skip);
+                                    tilesData.writeUInt8(tile.reserved);
+                                }
+                            } else if (tileLayerData.tilemap.switch) {
+                                tileLayerData.tilemap.flags = TilesLayerFlags.SWITCH;
+                                tileLayerData.tilemap.switch = currentDataIndex;
+
+                                for (let i in tileLayerData.tilemap.tiles) {
+                                    let tile = tileLayerData.tilemap.tiles[i];
+
+                                    tilesData.writeUInt8(tile.index);
+                                    tilesData.writeUInt8(tile.flags);
+                                    tilesData.writeUInt8(tile.skip);
+                                    tilesData.writeUInt8(tile.reserved);
+
+                                    let tileData = tile.data as SwitchTileData;
+                                    tilesDDNetData.writeUInt8(tileData.number);
+                                    tilesDDNetData.writeUInt8(tileData.type);
+                                    tilesDDNetData.writeUInt8(tileData.flags);
+                                    tilesDDNetData.writeUInt8(tileData.delay);
+                                }
+                            } else if (tileLayerData.tilemap.tune) {
+                                tileLayerData.tilemap.flags = TilesLayerFlags.TUNE;
+                                tileLayerData.tilemap.tune = currentDataIndex;
+
+                                for (let i in tileLayerData.tilemap.tiles) {
+                                    let tile = tileLayerData.tilemap.tiles[i];
+
+                                    tilesData.writeUInt8(tile.index);
+                                    tilesData.writeUInt8(tile.flags);
+                                    tilesData.writeUInt8(tile.skip);
+                                    tilesData.writeUInt8(tile.reserved);
+
+                                    let tileData = tile.data as TuneTileData;
+                                    tilesDDNetData.writeUInt8(tileData.number);
+                                    tilesDDNetData.writeUInt8(tileData.type);
+                                }
+                            } else {
+                                tileLayerData.tilemap.flags = tileLayerData.tilemap.game ? TilesLayerFlags.GAME : 0;
+
+                                for (let i in tileLayerData.tilemap.tiles) {
+                                    let tile = tileLayerData.tilemap.tiles[i];
+
+                                    tilesData.writeUInt8(tile.index);
+                                    tilesData.writeUInt8(tile.flags);
+                                    tilesData.writeUInt8(tile.skip);
+                                    tilesData.writeUInt8(tile.reserved);
+                                }
+                            }
+
+                            if (tilesDDNetData.length > 0) {
+                                currentDataIndex++;
+                                writeBuffer(tilesDDNetData.toBuffer());
+                            }
+
+                            let dataIndex = currentDataIndex;
+                            currentDataIndex++;
+                            writeBuffer(tilesData.toBuffer());
+
+                            layerBuffer.writeInt32LE(tileLayerData.tilemap.flags);
+                            writeColor(layerBuffer, tileLayerData.tilemap.color);
+                            layerBuffer.writeInt32LE(tileLayerData.tilemap.colorEnv);
+                            layerBuffer.writeInt32LE(tileLayerData.tilemap.colorEnvOffset);
+                            layerBuffer.writeInt32LE(tileLayerData.tilemap.image);
+
+                            // Save data and then the index
+                            layerBuffer.writeInt32LE(dataIndex);
+
+                            let ints = strToInts(tileLayerData.tilemap.name, 3);
+                            layerBuffer.writeInt32LE(ints[0]);
+                            layerBuffer.writeInt32LE(ints[1]);
+                            layerBuffer.writeInt32LE(ints[2]);
+                            layerBuffer.writeInt32LE(tileLayerData.tilemap.tele);
+                            layerBuffer.writeInt32LE(tileLayerData.tilemap.speedup);
+                            layerBuffer.writeInt32LE(tileLayerData.tilemap.front);
+                            layerBuffer.writeInt32LE(tileLayerData.tilemap.switch);
+                            layerBuffer.writeInt32LE(tileLayerData.tilemap.tune);
+
+                            // TODO: make automapper config here?
+                            // EDITOR io.cpp l441
+
+                            let curLength = layersBuffer.length;
+                            layersBuffer.writeInt32LE(layerBuffer.length);
+                            let newLength = layersBuffer.length;
+                            layerOffsets.writeInt32LE(currentLayerOffset);
+                            currentLayerIndex++;
+                            currentLayerOffset += newLength - curLength;
+                        }
+                    }
+                }
+
+                let curLength = itemsBuffer.length;
+                itemsBuffer.writeInt32LE(itemBuffer.length);
+                itemsBuffer.writeBuffer(itemBuffer.toBuffer());
+                let newLength = itemsBuffer.length;
+                itemOffsets.writeInt32LE(currentItemOffset);
+                currentItemOffset += newLength - curLength;
             }
         }
     }
+
+    writeItems(ItemTypes.VERSION);
+    writeItems(ItemTypes.INFO);
+    writeItems(ItemTypes.IMAGE);
+    writeItems(ItemTypes.SOUND);
+    writeItems(ItemTypes.ENVELOPE);
+    writeItems(ItemTypes.ENVPOINTS);
+    writeItems(ItemTypes.GROUP);
+
+    // TODO: save layers here
+
+    let layerCurOffsets = [];
+
+    while (layersBuffer.remaining() > 0) {
+        layerCurOffsets.push(layerOffsets.readInt32LE() + currentDataOffset);
+    }
+
+    for (let i in layerCurOffsets) {
+        dataOffsets.writeInt32LE(layerCurOffsets[i]);
+    }
+
+    itemsBuffer.writeBuffer(layersBuffer.toBuffer());
+
+    buffer.writeBuffer(itemOffsets.toBuffer());
+    buffer.writeBuffer(dataOffsets.toBuffer());
+    buffer.writeBuffer(dataSizes.toBuffer());
+    buffer.writeBuffer(itemsBuffer.toBuffer());
+    buffer.writeBuffer(dataBuffer.toBuffer());
+
+    // TODO: Need to fix: header item and data size are not correct, must be set from these buffers.
 
     return buffer.toBuffer();
 }
