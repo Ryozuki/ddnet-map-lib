@@ -85,7 +85,7 @@ function strToInts(text: string, num: number) {
     return ints;
 }
 
-export function mapToObject(pathOrData: PathLike | number): DDNetMap {
+export function loadMap(pathOrData: PathLike | number): DDNetMap {
     let map: any = {
         _version: 1,
     };
@@ -657,7 +657,7 @@ export function mapToObject(pathOrData: PathLike | number): DDNetMap {
     return map as DDNetMap;
 }
 
-export function objectToMap(map: DDNetMap): Buffer {
+export function saveMap(map: DDNetMap): Buffer {
     let buffer = new SmartBuffer();
 
     // Version header
@@ -759,7 +759,7 @@ export function objectToMap(map: DDNetMap): Buffer {
                     itemsBuffer.writeInt32LE(typeAndID);
 
                     let itemBuffer = new SmartBuffer();
-                    if (item.type !== ItemTypes.ENVELOPE) {
+                    if (item.type !== ItemTypes.ENVPOINTS) {
                         itemBuffer.writeInt32LE((item.data as any).version);
                     }
 
