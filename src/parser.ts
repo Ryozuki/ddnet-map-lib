@@ -3,7 +3,6 @@ import fs, { PathLike } from 'fs';
 import { InvalidVersionHeaderError } from './errors';
 import zlib from 'zlib';
 import { ItemTypes } from './ItemTypes';
-import util from 'util';
 import { LayerTypes } from './LayerTypes';
 import { TilesLayerFlags } from './TilesLayerFlags';
 import { TileTypes } from './TileTypes';
@@ -23,11 +22,10 @@ import {
     SpeedupTileData,
     SwitchTileData,
     TuneTileData,
+    QuadsLayer,
+    Point,
 } from './DDNetMap';
-
-/*
-Images on layers are referenced by their id.
-*/
+import { UuidConstants } from './Uuid';
 
 function getString(itemData: SmartBuffer, dataFiles: SmartBuffer[]) {
     let i = itemData.readInt32LE();
@@ -107,6 +105,30 @@ function writeColor(buffer: SmartBuffer, color: Color) {
     buffer.writeInt32LE(color.a);
 }
 
+function writePoint(buffer: SmartBuffer, point: Point) {
+    buffer.writeInt32LE(point.x);
+    buffer.writeInt32LE(point.y);
+}
+
+function externalItemData(internalType: number, typeIndex: number, itemData: SmartBuffer) {
+    if (internalType <= UuidConstants.OFFSET_UUID_TYPE || internalType == UuidConstants.ITEMTYPE_EX) {
+        return internalType;
+    }
+
+    if (typeIndex < 0 || itemData.length < 4 * 8) {
+        return internalType;
+    }
+
+    let lastReadOffset = itemData.readOffset;
+    itemData.readOffset = 0;
+
+    let uuid = [];
+    uuid.push(itemData.readInt32LE());
+    uuid.push(itemData.readInt32LE());
+    uuid.push(itemData.readInt32LE());
+    uuid.push(itemData.readInt32LE());
+}
+
 export function loadMap(pathOrData: PathLike | number): DDNetMap {
     let map: any = {
         _version: 1,
@@ -136,6 +158,9 @@ export function loadMap(pathOrData: PathLike | number): DDNetMap {
         itemSize: buffer.readInt32LE(),
         dataSize: buffer.readInt32LE(),
     };
+
+    console.log('header: ');
+    console.log(header);
 
     let itemTypes = [];
 
@@ -184,7 +209,6 @@ export function loadMap(pathOrData: PathLike | number): DDNetMap {
         if (map.meta.version === 4) {
             const uncompressedSize = dataSizes[i];
             const data = dataBuffer.readBuffer(size);
-
             dataFiles.push(SmartBuffer.fromBuffer(zlib.inflateSync(data)));
 
             if (dataFiles[i].length !== uncompressedSize) {
@@ -215,6 +239,12 @@ export function loadMap(pathOrData: PathLike | number): DDNetMap {
             type,
             id,
         });
+    }
+
+    if (items.length !== header.numItems) {
+        console.error(
+            `Header item count doesn't match actual item count: header=${header.numItems} actual=${items.length}`,
+        );
     }
 
     let dataItems = [];
@@ -682,6 +712,7 @@ export function loadMap(pathOrData: PathLike | number): DDNetMap {
 export function saveMap(map: DDNetMap): Buffer {
     let headerBuffer = new SmartBuffer();
     let buffer = new SmartBuffer();
+    let itemTypesBuffer = new SmartBuffer();
 
     // Version header
     headerBuffer.writeString(map.meta.magic);
@@ -722,9 +753,9 @@ export function saveMap(map: DDNetMap): Buffer {
     function writeCount(type: ItemTypes, count: number) {
         if (count > 0) {
             numItemTypes++;
-            buffer.writeInt32LE(type);
-            buffer.writeInt32LE(start);
-            buffer.writeInt32LE(count);
+            itemTypesBuffer.writeInt32LE(type);
+            itemTypesBuffer.writeInt32LE(start);
+            itemTypesBuffer.writeInt32LE(count);
 
             start += count;
         }
@@ -742,38 +773,40 @@ export function saveMap(map: DDNetMap): Buffer {
 
     let itemOffsets = new SmartBuffer();
     let dataOffsets = new SmartBuffer();
+    let layerOffsets = new SmartBuffer();
 
     let currentItemOffset = 0;
+
     let currentDataIndex = 0;
     let currentDataOffset = 0;
-    let currentLayerIndex = 0;
 
-    let layersBuffer = new SmartBuffer();
-    let layerOffsets = new SmartBuffer();
+    let currentLayerIndex = 0;
     let currentLayerOffset = 0;
 
-    let dataSizes = new SmartBuffer();
+    let layersBuffer = new SmartBuffer();
     let itemsBuffer = new SmartBuffer();
+
+    let dataSizes = new SmartBuffer();
     let dataBuffer = new SmartBuffer();
 
-    function writeString(text: string) {
-        let curLength = dataBuffer.length;
-        let buf = Buffer.from(text, 'ascii');
-        // TODO: figure out if the data sizes contains compressed values or not
-        dataSizes.writeInt32LE(buf.length);
-        dataBuffer.writeBuffer(zlib.deflateSync(text));
-        let newLength = dataBuffer.length;
-        dataOffsets.writeInt32LE(currentDataOffset);
-        currentDataOffset += newLength - curLength;
+    function strToBuf(text: string) {
+        let buf = new SmartBuffer();
+        buf.writeStringNT(text, 'utf8');
+        return buf.toBuffer();
     }
 
-    function writeBuffer(buf: Buffer) {
-        let curLength = dataBuffer.length;
-        dataSizes.writeInt32LE(buf.length);
-        dataBuffer.writeBuffer(zlib.deflateSync(buf));
-        let newLength = dataBuffer.length;
+    function addData(buf: Buffer, compress = true) {
         dataOffsets.writeInt32LE(currentDataOffset);
-        currentDataOffset += newLength - curLength;
+        dataSizes.writeInt32LE(buf.length);
+        if (compress) {
+            dataBuffer.writeBuffer(zlib.deflateSync(buf));
+        } else {
+            dataBuffer.writeBuffer(buf);
+        }
+
+        currentDataOffset = dataBuffer.length;
+        currentDataIndex++;
+        return currentDataIndex - 1;
     }
 
     function writeItems(type: ItemTypes) {
@@ -791,30 +824,22 @@ export function saveMap(map: DDNetMap): Buffer {
                 if (type === ItemTypes.INFO) {
                     let data = item.data as InfoData;
                     if (data.author && data.author !== '') {
-                        itemBuffer.writeInt32LE(currentDataIndex);
-                        currentDataIndex++;
-                        writeString(data.author);
+                        itemBuffer.writeInt32LE(addData(strToBuf(data.author)));
                     } else {
                         itemBuffer.writeInt32LE(-1);
                     }
                     if (data.mapVersion && data.mapVersion !== '') {
-                        itemBuffer.writeInt32LE(currentDataIndex);
-                        currentDataIndex++;
-                        writeString(data.mapVersion);
+                        itemBuffer.writeInt32LE(addData(strToBuf(data.mapVersion)));
                     } else {
                         itemBuffer.writeInt32LE(-1);
                     }
                     if (data.credits && data.credits !== '') {
-                        itemBuffer.writeInt32LE(currentDataIndex);
-                        currentDataIndex++;
-                        writeString(data.credits);
+                        itemBuffer.writeInt32LE(addData(strToBuf(data.credits)));
                     } else {
                         itemBuffer.writeInt32LE(-1);
                     }
                     if (data.license && data.license !== '') {
-                        itemBuffer.writeInt32LE(currentDataIndex);
-                        currentDataIndex++;
-                        writeString(data.license);
+                        itemBuffer.writeInt32LE(addData(strToBuf(data.license)));
                     } else {
                         itemBuffer.writeInt32LE(-1);
                     }
@@ -824,14 +849,10 @@ export function saveMap(map: DDNetMap): Buffer {
                     itemBuffer.writeInt32LE(data.height);
                     itemBuffer.writeInt32LE(data.external);
 
-                    itemBuffer.writeInt32LE(currentDataIndex);
-                    currentDataIndex++;
-                    writeString(data.name);
+                    itemBuffer.writeInt32LE(addData(strToBuf(data.name)));
 
                     if (data.external !== 1) {
-                        itemBuffer.writeInt32LE(currentDataIndex);
-                        currentDataIndex++;
-                        writeBuffer(data.imageData!);
+                        itemBuffer.writeInt32LE(addData(data.imageData!, false));
                     } else {
                         itemBuffer.writeInt32LE(-1);
                     }
@@ -839,14 +860,10 @@ export function saveMap(map: DDNetMap): Buffer {
                     let data = item.data as SoundData;
                     itemBuffer.writeInt32LE(data.external);
 
-                    itemBuffer.writeInt32LE(currentDataIndex);
-                    currentDataIndex++;
-                    writeString(data.name);
+                    itemBuffer.writeInt32LE(addData(strToBuf(data.name)));
 
                     if (data.external !== 1) {
-                        itemBuffer.writeInt32LE(currentDataIndex);
-                        currentDataIndex++;
-                        writeBuffer(data.soundData!);
+                        itemBuffer.writeInt32LE(addData(data.soundData!, false));
                     } else {
                         itemBuffer.writeInt32LE(-1);
                     }
@@ -901,6 +918,8 @@ export function saveMap(map: DDNetMap): Buffer {
 
                         let layerBuffer = new SmartBuffer();
 
+                        let typeAndID = ((ItemTypes.LAYER << 16) << 16) | currentLayerIndex;
+
                         layerBuffer.writeInt32LE(layerdata.version);
                         layerBuffer.writeInt32LE(layerdata.layerType);
                         layerBuffer.writeInt32LE(layerdata.flags);
@@ -915,7 +934,7 @@ export function saveMap(map: DDNetMap): Buffer {
                             let tilesDDNetData = new SmartBuffer();
 
                             tileLayerData.tilemap.flags = 0;
-                            if (tileLayerData.tilemap.tele) {
+                            if (tileLayerData.tilemap.tele > 0) {
                                 tileLayerData.tilemap.flags = TilesLayerFlags.TELE;
 
                                 tileLayerData.tilemap.tele = currentDataIndex;
@@ -933,7 +952,7 @@ export function saveMap(map: DDNetMap): Buffer {
                                     tilesDDNetData.writeUInt8(tileData.number);
                                     tilesDDNetData.writeUInt8(tileData.type);
                                 }
-                            } else if (tileLayerData.tilemap.speedup) {
+                            } else if (tileLayerData.tilemap.speedup > 0) {
                                 tileLayerData.tilemap.flags = TilesLayerFlags.SPEEDUP;
                                 tileLayerData.tilemap.speedup = currentDataIndex;
 
@@ -951,7 +970,7 @@ export function saveMap(map: DDNetMap): Buffer {
                                     tilesDDNetData.writeUInt8(tileData.type);
                                     tilesDDNetData.writeInt16LE(tileData.angle);
                                 }
-                            } else if (tileLayerData.tilemap.front) {
+                            } else if (tileLayerData.tilemap.front > 0) {
                                 tileLayerData.tilemap.flags = TilesLayerFlags.FRONT;
                                 tileLayerData.tilemap.front = currentDataIndex;
 
@@ -963,7 +982,7 @@ export function saveMap(map: DDNetMap): Buffer {
                                     tilesData.writeUInt8(tile.skip);
                                     tilesData.writeUInt8(tile.reserved);
                                 }
-                            } else if (tileLayerData.tilemap.switch) {
+                            } else if (tileLayerData.tilemap.switch > 0) {
                                 tileLayerData.tilemap.flags = TilesLayerFlags.SWITCH;
                                 tileLayerData.tilemap.switch = currentDataIndex;
 
@@ -981,7 +1000,7 @@ export function saveMap(map: DDNetMap): Buffer {
                                     tilesDDNetData.writeUInt8(tileData.flags);
                                     tilesDDNetData.writeUInt8(tileData.delay);
                                 }
-                            } else if (tileLayerData.tilemap.tune) {
+                            } else if (tileLayerData.tilemap.tune > 0) {
                                 tileLayerData.tilemap.flags = TilesLayerFlags.TUNE;
                                 tileLayerData.tilemap.tune = currentDataIndex;
 
@@ -1011,13 +1030,8 @@ export function saveMap(map: DDNetMap): Buffer {
                             }
 
                             if (tilesDDNetData.length > 0) {
-                                currentDataIndex++;
-                                writeBuffer(tilesDDNetData.toBuffer());
+                                addData(tilesDDNetData.toBuffer());
                             }
-
-                            let dataIndex = currentDataIndex;
-                            currentDataIndex++;
-                            writeBuffer(tilesData.toBuffer());
 
                             layerBuffer.writeInt32LE(tileLayerData.tilemap.flags);
                             writeColor(layerBuffer, tileLayerData.tilemap.color);
@@ -1025,8 +1039,8 @@ export function saveMap(map: DDNetMap): Buffer {
                             layerBuffer.writeInt32LE(tileLayerData.tilemap.colorEnvOffset);
                             layerBuffer.writeInt32LE(tileLayerData.tilemap.image);
 
-                            // Save data and then the index
-                            layerBuffer.writeInt32LE(dataIndex);
+                            // Save data
+                            layerBuffer.writeInt32LE(addData(tilesData.toBuffer()));
 
                             let ints = strToInts(tileLayerData.tilemap.name, 3);
                             layerBuffer.writeInt32LE(ints[0]);
@@ -1041,22 +1055,61 @@ export function saveMap(map: DDNetMap): Buffer {
                             // TODO: make automapper config here?
                             // EDITOR io.cpp l441
 
-                            let curLength = layersBuffer.length;
+                            layersBuffer.writeInt32LE(typeAndID);
                             layersBuffer.writeInt32LE(layerBuffer.length);
-                            let newLength = layersBuffer.length;
+                            layersBuffer.writeBuffer(layerBuffer.toBuffer());
                             layerOffsets.writeInt32LE(currentLayerOffset);
                             currentLayerIndex++;
-                            currentLayerOffset += newLength - curLength;
+                            currentLayerOffset = layersBuffer.length;
+                        } else if (layerdata.layerType === LayerTypes.QUADS) {
+                            let quadLayerData = (layerdata as any) as (Layer & QuadsLayer);
+                            quadLayerData.flags = LayerTypes.QUADS;
+                            layerBuffer.writeInt32LE(quadLayerData.version);
+                            layerBuffer.writeInt32LE(quadLayerData.layerType);
+                            layerBuffer.writeInt32LE(quadLayerData.flags);
+                            layerBuffer.writeInt32LE(quadLayerData.quadInfo.version);
+                            layerBuffer.writeInt32LE(quadLayerData.quads.length);
+
+                            let quadsData = new SmartBuffer();
+
+                            for (let i in quadLayerData.quads) {
+                                let quad = quadLayerData.quads[i];
+                                for (let j in quad.points) {
+                                    writePoint(quadsData, quad.points[j]);
+                                }
+                                for (let j in quad.colors) {
+                                    writeColor(quadsData, quad.colors[j]);
+                                }
+                                for (let j in quad.colors) {
+                                    writePoint(quadsData, quad.texCoords[j]);
+                                }
+                                quadsData.writeInt32LE(quad.posEnv);
+                                quadsData.writeInt32LE(quad.posEnvOffset);
+                                quadsData.writeInt32LE(quad.colorEnv);
+                                quadsData.writeInt32LE(quad.colorEnvOffset);
+                            }
+
+                            layerBuffer.writeInt32LE(addData(quadsData.toBuffer()));
+                            layerBuffer.writeInt32LE(quadLayerData.quadInfo.image);
+                            let ints = strToInts(quadLayerData.quadInfo.name, 3);
+                            layerBuffer.writeInt32LE(ints[0]);
+                            layerBuffer.writeInt32LE(ints[1]);
+                            layerBuffer.writeInt32LE(ints[2]);
+
+                            let typeAndID = (ItemTypes.LAYER << 16) | currentLayerIndex;
+                            layersBuffer.writeInt32LE(typeAndID);
+                            layersBuffer.writeInt32LE(layerBuffer.length);
+                            layersBuffer.writeBuffer(layerBuffer.toBuffer());
+                            layerOffsets.writeInt32LE(currentLayerOffset);
+                            currentLayerIndex++;
+                            currentLayerOffset = layersBuffer.length;
                         }
                     }
                 }
-
-                let curLength = itemsBuffer.length;
                 itemsBuffer.writeInt32LE(itemBuffer.length);
                 itemsBuffer.writeBuffer(itemBuffer.toBuffer());
-                let newLength = itemsBuffer.length;
                 itemOffsets.writeInt32LE(currentItemOffset);
-                currentItemOffset += newLength - curLength;
+                currentItemOffset = itemsBuffer.length;
             }
         }
     }
@@ -1083,6 +1136,7 @@ export function saveMap(map: DDNetMap): Buffer {
 
     itemsBuffer.writeBuffer(layersBuffer.toBuffer());
 
+    buffer.writeBuffer(itemTypesBuffer.toBuffer());
     buffer.writeBuffer(itemOffsets.toBuffer());
     buffer.writeBuffer(dataOffsets.toBuffer());
     buffer.writeBuffer(dataSizes.toBuffer());
@@ -1091,10 +1145,11 @@ export function saveMap(map: DDNetMap): Buffer {
 
     // Header
     headerBuffer.writeInt32LE(buffer.length + 20);
-    headerBuffer.writeInt32LE(map.header.swaplen); // need to count all integers?
+    headerBuffer.writeInt32LE(buffer.length + 20 - dataBuffer.length); // swaplen
     headerBuffer.writeInt32LE(numItemTypes);
     headerBuffer.writeInt32LE(map.items.length + layerCount);
-    headerBuffer.writeInt32LE(currentDataIndex + 1);
+    headerBuffer.writeInt32LE(dataOffsets.length);
+    console.log('numdata: ' + dataOffsets.length);
     headerBuffer.writeInt32LE(itemsBuffer.length);
     headerBuffer.writeInt32LE(dataBuffer.length);
 

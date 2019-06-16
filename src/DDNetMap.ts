@@ -120,6 +120,7 @@ export interface QuadsLayer {
     quads: {
         points: [Point, Point, Point, Point, Point];
         colors: [Color, Color, Color, Color];
+        texCoords: [Point, Point, Point, Point];
         posEnv: number;
         posEnvOffset: number;
         colorEnv: number;
@@ -199,15 +200,6 @@ export interface DDNetMap extends Object {
     meta: {
         magic: string;
         version: number;
-    };
-    header: {
-        size: number;
-        swaplen: number;
-        numItemTypes: number;
-        numItems: number;
-        numData: number;
-        itemSize: number;
-        dataSize: number;
     };
     items: Item[];
 }
